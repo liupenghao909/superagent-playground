@@ -1,3 +1,5 @@
+import pytest
+
 from superagent_playground.parser import (
     ToolInvocation,
     parse_action,
@@ -94,3 +96,105 @@ def test_empty_response_yields_nothing():
     assert parsed.thought is None
     assert parsed.action_text is None
     assert parsed.action is None
+
+
+def test_parse_action_supports_unicode_tool_names():
+    action = parse_action("搜索[天气]")
+
+    assert action.kind == "tool"
+    assert action.invocation == ToolInvocation("搜索", "天气")
+
+
+def test_parse_action_rejects_empty_text():
+    assert parse_action("").kind == "invalid"
+
+
+def test_fabricated_observation_does_not_pollute_tool_input():
+    parsed = parse_output(
+        "Thought: 搜索。\nAction: Search[华为手机]\nObservation: 搜索结果 [1]"
+    )
+
+    assert parsed.action_text == "Search[华为手机]"
+    assert parsed.invocation == ToolInvocation("Search", "华为手机")
+
+
+def test_second_action_is_ignored():
+    parsed = parse_output(
+        "Thought: 两次。\nAction: Calculator[1 + 1]\nAction: Finish[2]"
+    )
+
+    assert parsed.action_text == "Calculator[1 + 1]"
+    assert parsed.invocation == ToolInvocation("Calculator", "1 + 1")
+
+
+def test_same_line_fabricated_observation_does_not_pollute_tool_input():
+    parsed = parse_output(
+        "Thought: 搜索。\nAction: Search[华为手机] Observation: 搜索结果 [1]"
+    )
+
+    assert parsed.action_text == "Search[华为手机]"
+    assert parsed.invocation == ToolInvocation("Search", "华为手机")
+
+
+def test_multiline_finish_answer_may_contain_an_observation_label():
+    parsed = parse_output(
+        "Thought: 总结。\nAction: Finish[结果如下：\nObservation: 实验表明 ...]"
+    )
+
+    assert parsed.finish_answer == "结果如下：\nObservation: 实验表明 ..."
+
+
+def test_multiline_tool_input_may_contain_an_observation_label():
+    parsed = parse_output(
+        "Thought: 搜索。\nAction: Search[第一行\nObservation: 第二行]"
+    )
+
+    assert parsed.invocation == ToolInvocation("Search", "第一行\nObservation: 第二行")
+
+
+@pytest.mark.parametrize(
+    "action",
+    [
+        "`Calculator[1 + 1]`",
+        "**Calculator[1 + 1]**",
+        "__Calculator[1 + 1]__",
+        "*Calculator[1 + 1]*",
+    ],
+)
+def test_action_markdown_wrapper_is_removed(action):
+    parsed = parse_output(f"Thought: 计算。\nAction: {action}")
+
+    assert parsed.action_text == "Calculator[1 + 1]"
+    assert parsed.invocation == ToolInvocation("Calculator", "1 + 1")
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        ("Thought: 完成。\nAction: Finish[42]。", "42"),
+        ("Thought: 完成。\nAction: Finish[42].", "42"),
+        ("Thought: 完成。\nAction: Finish[42]！", "42"),
+    ],
+)
+def test_finish_tolerates_trailing_punctuation(text, expected):
+    assert parse_output(text).finish_answer == expected
+
+
+def test_tool_action_tolerates_trailing_punctuation():
+    parsed = parse_output("Thought: 搜索。\nAction: Search[天气]。")
+
+    assert parsed.invocation == ToolInvocation("Search", "天气")
+
+
+def test_trailing_code_fence_is_tolerated():
+    parsed = parse_output("Thought: 完成。\nAction: Finish[42]\n```")
+
+    assert parsed.finish_answer == "42"
+
+
+def test_prose_before_a_fenced_response_is_tolerated():
+    parsed = parse_output(
+        "好的，下面开始：\n```\nThought: 完成。\nAction: Finish[42]\n```"
+    )
+
+    assert parsed.finish_answer == "42"

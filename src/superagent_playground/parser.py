@@ -19,10 +19,27 @@ _ACTION_RE = re.compile(
     rf"Action{_LABEL_SEP}(.*)\Z",
     re.DOTALL | re.IGNORECASE,
 )
-_FINISH_RE = re.compile(r"^Finish\s*\[(.*)\]\s*$", re.DOTALL | re.IGNORECASE)
-_INVOCATION_RE = re.compile(
-    r"^([A-Za-z_][\w.-]*)\s*\[(.*)\]\s*$", re.DOTALL
+_TRAILING_PUNCT_RE = r"[。．.，,；;！!？?]"
+_FINISH_RE = re.compile(
+    rf"^Finish\s*\[(.*)\]\s*{_TRAILING_PUNCT_RE}?\s*$",
+    re.DOTALL | re.IGNORECASE,
 )
+# Tool names may be any Unicode word start (plus ``_``); a leading digit is
+# rejected so that ``1[2]`` is never mistaken for a tool invocation.
+_INVOCATION_RE = re.compile(
+    rf"^([^\W\d][\w.-]*)\s*\[(.*)\]\s*{_TRAILING_PUNCT_RE}?\s*$",
+    re.DOTALL,
+)
+# A model may append a fabricated ``Observation:`` (or a second ``Action:``)
+# after the real action, either on the next line or on the same line. Only cut
+# when the action already has a closing bracket, so a legitimate multiline
+# Finish answer is left untouched.
+_TRAILING_LABEL_RE = re.compile(
+    rf"(?:\n[ \t]*|(?<=\])[ \t]+)(?:\*\*|__)?[ \t]*(?:Observation|Action){_LABEL_SEP}",
+    re.IGNORECASE,
+)
+_TRAILING_FENCE_RE = re.compile(r"\n[ \t]*```[^\n]*\s*$")
+_INLINE_WRAPPERS = (("**", "**"), ("__", "__"), ("`", "`"), ("*", "*"))
 _FENCE_RE = re.compile(r"^\s*```[^\n]*\n(.*?)\n?```\s*$", re.DOTALL)
 
 
@@ -78,13 +95,55 @@ def _strip_code_fence(text: str) -> str:
     match = _FENCE_RE.match(text)
     if match:
         return match.group(1).strip()
-    return text.strip()
+    cleaned = text.strip()
+    if _TRAILING_FENCE_RE.search(cleaned):
+        cleaned = _TRAILING_FENCE_RE.sub("", cleaned).strip()
+    return cleaned
+
+
+def _strip_inline_wrapper(text: str) -> str:
+    """Remove a matched Markdown wrapper around the whole action value."""
+
+    text = text.strip()
+    # ``Action: **Calculator[...]**`` loses its opening ``**`` to the label
+    # separator, so the closing marker is left dangling after the brackets.
+    for marker in ("**", "__"):
+        if (
+            text.endswith(marker)
+            and not text.startswith(marker)
+            and "]" in text[: -len(marker)]
+        ):
+            text = text[: -len(marker)].rstrip()
+    changed = True
+    while changed:
+        changed = False
+        for left, right in _INLINE_WRAPPERS:
+            if (
+                len(text) > len(left) + len(right)
+                and text.startswith(left)
+                and text.endswith(right)
+            ):
+                inner = text[len(left) : -len(right)].strip()
+                if inner:
+                    text = inner
+                    changed = True
+                    break
+    return text
+
+
+def _cut_trailing_labels(text: str) -> str:
+    """Drop a fabricated ``Observation:``/``Action:`` after the real action."""
+
+    match = _TRAILING_LABEL_RE.search(text)
+    if match is None or "]" not in text[: match.start()]:
+        return text
+    return text[: match.start()].rstrip()
 
 
 def parse_action(action_text: str) -> Action:
     """Parse ``Tool[input]`` or ``Finish[answer]``; invalid text yields kind=invalid."""
 
-    raw = (action_text or "").strip()
+    raw = _strip_inline_wrapper(action_text or "")
     if not raw:
         return Action(raw=raw)
 
@@ -121,6 +180,8 @@ def parse_output(text: str) -> ParsedOutput:
 
     thought = thought_match.group(1).strip() if thought_match else None
     action_text = action_match.group(1).strip() if action_match else None
+    if action_text:
+        action_text = _strip_inline_wrapper(_cut_trailing_labels(action_text))
 
     return ParsedOutput(
         thought=thought or None,

@@ -56,9 +56,7 @@ def _print_result(result: ReActResult) -> None:
     if result.ok:
         print(f"最终答案: {result.answer}")
         return
-    if result.reason == "llm_error":
-        print(f"LLM 调用失败: {result.error}", file=sys.stderr)
-    elif result.reason == "max_steps":
+    if result.reason == "max_steps":
         print(
             f"已达到最大步数 {len(result.steps)}，未能得到最终答案。",
             file=sys.stderr,

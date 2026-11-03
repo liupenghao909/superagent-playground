@@ -1,6 +1,7 @@
 import pytest
 
 from superagent_playground import cli
+from superagent_playground.tools import ToolRegistry
 
 
 class StubLLM:
@@ -79,3 +80,33 @@ def test_cli_prints_fallback_answer(monkeypatch, capsys):
     captured = capsys.readouterr()
     assert exit_code == 1
     assert "兜底答案" in captured.out
+
+
+def test_cli_reports_max_steps(monkeypatch, capsys):
+    class LoopingLLM:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def think(self, messages, *, temperature=None):
+            return "Thought: 继续。\nAction: Search[x]"
+
+    registry = ToolRegistry()
+    registry.register("Search", "搜索工具。", lambda query: "结果")
+    monkeypatch.setattr(cli, "OpenAILLM", LoopingLLM)
+    monkeypatch.setattr(cli, "build_default_registry", lambda: registry)
+
+    exit_code = cli.main(["问题", "--quiet", "--max-steps", "2"])
+
+    captured = capsys.readouterr()
+    assert exit_code == 1
+    assert "已达到最大步数 2" in captured.err
+
+
+def test_cli_stream_mode_prints_result(monkeypatch, capsys):
+    monkeypatch.setattr(cli, "OpenAILLM", StubLLM)
+
+    exit_code = cli.main(["问题", "--stream"])
+
+    captured = capsys.readouterr()
+    assert exit_code == 0
+    assert "最终答案: 42" in captured.out
