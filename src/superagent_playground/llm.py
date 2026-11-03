@@ -197,6 +197,7 @@ class OpenAILLM:
         )
         attempts = self.retries + 1
         last_error: LLMError | None = None
+        retried = 0
         for attempt in range(1, attempts + 1):
             emitted = False
 
@@ -215,10 +216,11 @@ class OpenAILLM:
                 # Retrying mid-stream would print the same tokens twice.
                 if attempt >= attempts or emitted:
                     break
-        if attempts == 1:
+                retried += 1
+        if retried == 0:
             raise LLMError(f"调用 LLM 失败: {last_error}") from last_error
         raise LLMError(
-            f"调用 LLM 失败（已重试 {self.retries} 次）: {last_error}"
+            f"调用 LLM 失败（已重试 {retried} 次）: {last_error}"
         ) from last_error
 
     def _create(self, messages: Sequence[Mapping[str, str]], temperature: float, *, stream: bool):

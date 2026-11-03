@@ -308,8 +308,9 @@ def test_openai_llm_does_not_retry_after_partial_stream():
         on_token=tokens.append,
     )
 
-    with pytest.raises(LLMError, match="stream broke"):
+    with pytest.raises(LLMError, match="stream broke") as excinfo:
         llm.think([{"role": "user", "content": "hi"}])
 
+    assert "已重试" not in str(excinfo.value)
     assert tokens == ["部分"]
     assert completions.calls == 1

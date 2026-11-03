@@ -253,3 +253,37 @@ def test_prompt_includes_tools_question_and_history():
     assert "Question: 问题" in prompt
     assert "Action: Echo[x]" in prompt
     assert "Finish[" in prompt
+
+
+def test_agent_does_not_pass_fabricated_observation_to_tool():
+    calls = []
+    registry = ToolRegistry()
+    registry.register(
+        "Search", "搜索工具。", lambda query: calls.append(query) or "真实结果"
+    )
+    llm = FakeLLM(
+        [
+            "Thought: 搜索。\nAction: Search[华为手机]\nObservation: 伪造结果 [1]",
+            "Thought: 完成。\nAction: Finish[完成]",
+        ]
+    )
+    result = ReActAgent(llm, registry, max_steps=3).run("问题")
+
+    assert calls == ["华为手机"]
+    assert result.steps[0].observation == "真实结果"
+    assert result.ok
+
+
+def test_agent_calls_unicode_named_tool():
+    registry = ToolRegistry()
+    registry.register("搜索", "搜索工具。", lambda query: f"结果: {query}")
+    llm = FakeLLM(
+        [
+            "Thought: 搜索。\nAction: 搜索[天气]",
+            "Thought: 完成。\nAction: Finish[完成]",
+        ]
+    )
+    result = ReActAgent(llm, registry, max_steps=3).run("问题")
+
+    assert result.ok
+    assert result.steps[0].observation == "结果: 天气"

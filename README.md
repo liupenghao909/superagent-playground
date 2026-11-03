@@ -13,6 +13,7 @@
 - 内置两个工具：`Search`（SerpApi 网页搜索）与 `Calculator`（安全的算术计算器）
 - 可注册自定义工具，工具描述会自动进入提示词
 - `max_steps` 安全阀、工具异常兜底、无法解析 Action 时自动把错误反馈给模型重试
+- 解析器兼容 Markdown 粗体 / 行内代码 / 代码块与尾随标点，并忽略 Action 之后伪造的 Observation 或多余的 Action
 - LLM 调用失败自动重试 1 次；重试后仍失败则返回兜底答案，而不是中断整个循环
 - 结构化返回 `ReActResult` / `Step`，方便测试和二次开发
 - 无需 API Key 的离线演示；单元测试覆盖解析、工具、循环、配置与 CLI
@@ -124,7 +125,7 @@ superagent --quiet "..."         # 只输出最终答案
 src/superagent_playground/
 ├── agent.py      # ReActAgent：提示词 -> LLM -> 解析 -> 工具 -> 历史
 ├── prompt.py     # ReAct 提示词模板
-├── parser.py     # 解析 Thought/Action/Finish，容错 Markdown 粗体与代码块
+├── parser.py     # 解析 Thought/Action/Finish，容错 Markdown 粗体、行内代码与代码块
 ├── tools.py      # 工具注册表、Search、Calculator
 ├── llm.py        # OpenAI 兼容客户端与配置
 ├── demo.py       # 离线脚本化模型演示
@@ -184,6 +185,9 @@ pytest --cov=superagent_playground
 
 - ReAct 的稳定性依赖模型遵循 `Thought/Action` 格式；解析失败时会把格式要求反馈给模型重试，但仍可能耗尽 `max_steps`。
 - 每次 `run` 都会重置历史，目前没有跨轮对话记忆或持久化。
+- History 只保存 Action 与 Observation，不保存 Thought（与 Hello-Agents 第 4 章参考实现一致）；依赖上一轮中间推理的任务需要模型从 Observation 重新推导。
+- `--stream` 只打印模型原始输出；工具 Observation 与步骤分隔只在非流式（verbose）模式下显示，需要完整轨迹时请去掉 `--stream`。
+- 工具返回的 Observation 会原样进入下一轮提示词，接入有副作用的工具前应评估提示注入风险；工具调用没有超时，自定义工具需要自行控制执行时间。
 - `Search` 使用 SerpApi，需要外部 Key 和网络。
 - 仅支持同步调用；并发、流式 UI、Plan-and-Solve / Reflection 等范式留作后续扩展。
 
