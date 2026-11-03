@@ -193,3 +193,123 @@ def test_openai_llm_wraps_api_errors():
 
     with pytest.raises(LLMError, match="502 bad gateway"):
         llm.think([{"role": "user", "content": "hi"}])
+
+
+class ScriptedCompletions:
+    """Raise or return each queued outcome, one per ``create`` call."""
+
+    def __init__(self, outcomes):
+        self.outcomes = list(outcomes)
+        self.calls = 0
+
+    def create(self, **kwargs):
+        self.calls += 1
+        outcome = self.outcomes.pop(0)
+        if isinstance(outcome, Exception):
+            raise outcome
+        return outcome
+
+
+def scripted_llm(outcomes, **kwargs):
+    completions = ScriptedCompletions(outcomes)
+    client = SimpleNamespace(chat=SimpleNamespace(completions=completions))
+    llm = OpenAILLM(
+        model="test-model",
+        api_key="test-key",
+        base_url="http://localhost:8000/v1",
+        client=client,
+        **kwargs,
+    )
+    return llm, completions
+
+
+def test_openai_llm_retries_a_failed_call_once():
+    llm, completions = scripted_llm(
+        [RuntimeError("502 bad gateway"), text_response("hello")]
+    )
+
+    assert llm.think([{"role": "user", "content": "hi"}]) == "hello"
+    assert completions.calls == 2
+
+
+def test_openai_llm_raises_after_retry_is_exhausted():
+    llm, completions = scripted_llm(
+        [RuntimeError("down"), RuntimeError("still down")]
+    )
+
+    with pytest.raises(LLMError, match="已重试 1 次"):
+        llm.think([{"role": "user", "content": "hi"}])
+
+    assert completions.calls == 2
+
+
+def test_openai_llm_retries_an_empty_completion():
+    llm, completions = scripted_llm([SimpleNamespace(choices=[]), text_response("ok")])
+
+    assert llm.think([{"role": "user", "content": "hi"}]) == "ok"
+    assert completions.calls == 2
+
+
+def test_openai_llm_can_disable_retries():
+    llm, completions = scripted_llm([RuntimeError("down")], retries=0)
+
+    with pytest.raises(LLMError, match="调用 LLM 失败: down"):
+        llm.think([{"role": "user", "content": "hi"}])
+
+    assert completions.calls == 1
+
+
+def test_openai_llm_rejects_negative_retries():
+    with pytest.raises(LLMError, match="retries"):
+        OpenAILLM(
+            model="test-model",
+            api_key="test-key",
+            base_url="http://localhost:8000/v1",
+            client=FakeClient(text_response("x")),
+            retries=-1,
+        )
+
+
+def test_openai_llm_retries_stream_before_any_token():
+    llm, completions = scripted_llm(
+        [RuntimeError("down"), stream_chunks("hello")],
+        stream=True,
+    )
+
+    assert llm.think([{"role": "user", "content": "hi"}]) == "hello"
+    assert completions.calls == 2
+
+
+def test_openai_llm_does_not_retry_after_partial_stream():
+    class PartialStreamCompletions:
+        def __init__(self):
+            self.calls = 0
+
+        def create(self, **kwargs):
+            self.calls += 1
+
+            def chunks():
+                yield SimpleNamespace(
+                    choices=[SimpleNamespace(delta=SimpleNamespace(content="部分"))]
+                )
+                raise RuntimeError("stream broke")
+
+            return chunks()
+
+    completions = PartialStreamCompletions()
+    client = SimpleNamespace(chat=SimpleNamespace(completions=completions))
+    tokens = []
+    llm = OpenAILLM(
+        model="test-model",
+        api_key="test-key",
+        base_url="http://localhost:8000/v1",
+        client=client,
+        stream=True,
+        on_token=tokens.append,
+    )
+
+    with pytest.raises(LLMError, match="stream broke"):
+        llm.think([{"role": "user", "content": "hi"}])
+
+    assert tokens == ["部分"]
+    assert completions.calls == 1

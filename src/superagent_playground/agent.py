@@ -10,6 +10,8 @@ from .parser import ParsedOutput, parse_output
 from .prompt import REACT_PROMPT_TEMPLATE, build_react_prompt
 from .tools import ToolRegistry
 
+FALLBACK_ANSWER = "抱歉，模型服务暂时不可用，请稍后重试。"
+
 
 @dataclass(frozen=True)
 class Step:
@@ -23,7 +25,12 @@ class Step:
 
 @dataclass
 class ReActResult:
-    """The outcome of one ``ReActAgent.run`` call."""
+    """The outcome of one ``ReActAgent.run`` call.
+
+    ``reason`` is ``"finish"``, ``"max_steps"`` or ``"llm_fallback"``. In the
+    last case ``answer`` holds a user-facing fallback message, ``error`` the
+    underlying failure and ``ok`` is False.
+    """
 
     question: str
     answer: str | None
@@ -33,7 +40,7 @@ class ReActResult:
 
     @property
     def ok(self) -> bool:
-        return self.answer is not None
+        return self.answer is not None and self.reason != "llm_fallback"
 
     @property
     def final_answer(self) -> str | None:
@@ -97,24 +104,12 @@ class ReActAgent:
             except Exception as exc:
                 message = f"LLM 调用失败: {exc}"
                 self._log(message)
-                return ReActResult(
-                    question=question,
-                    answer=None,
-                    steps=steps,
-                    reason="llm_error",
-                    error=message,
-                )
+                return self._fallback_result(question, steps, message)
 
             if not response or not response.strip():
                 message = "LLM 返回了空响应。"
                 self._log(message)
-                return ReActResult(
-                    question=question,
-                    answer=None,
-                    steps=steps,
-                    reason="llm_error",
-                    error=message,
-                )
+                return self._fallback_result(question, steps, message)
 
             parsed = parse_output(response)
             self._log_parsed(parsed)
@@ -182,6 +177,19 @@ class ReActAgent:
             answer=None,
             steps=steps,
             reason="max_steps",
+        )
+
+    def _fallback_result(
+        self, question: str, steps: list[Step], message: str
+    ) -> ReActResult:
+        """Return a user-facing answer when the model stays unreachable."""
+
+        return ReActResult(
+            question=question,
+            answer=FALLBACK_ANSWER,
+            steps=steps,
+            reason="llm_fallback",
+            error=message,
         )
 
     def _execute(self, tool_name: str, tool_input: str) -> str:

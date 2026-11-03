@@ -63,3 +63,19 @@ def test_cli_uses_injected_model(monkeypatch, capsys):
     captured = capsys.readouterr()
     assert exit_code == 0
     assert "最终答案: 42" in captured.out
+
+
+def test_cli_prints_fallback_answer(monkeypatch, capsys):
+    class FailingLLM:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def think(self, messages, *, temperature=None):
+            raise RuntimeError("network down")
+
+    monkeypatch.setattr(cli, "OpenAILLM", FailingLLM)
+    exit_code = cli.main(["问题", "--quiet"])
+
+    captured = capsys.readouterr()
+    assert exit_code == 1
+    assert "兜底答案" in captured.out

@@ -50,6 +50,9 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def _print_result(result: ReActResult) -> None:
+    if result.reason == "llm_fallback":
+        print(f"兜底答案: {result.answer}")
+        return
     if result.ok:
         print(f"最终答案: {result.answer}")
         return
