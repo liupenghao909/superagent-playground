@@ -13,6 +13,7 @@
 - 内置两个工具：`Search`（SerpApi 网页搜索）与 `Calculator`（安全的算术计算器）
 - 可注册自定义工具，工具描述会自动进入提示词
 - `max_steps` 安全阀、工具异常兜底、无法解析 Action 时自动把错误反馈给模型重试
+- LLM 调用失败自动重试 1 次；重试后仍失败则返回兜底答案，而不是中断整个循环
 - 结构化返回 `ReActResult` / `Step`，方便测试和二次开发
 - 无需 API Key 的离线演示；单元测试覆盖解析、工具、循环、配置与 CLI
 
@@ -131,6 +132,20 @@ src/superagent_playground/
 tests/            # pytest 单元测试
 examples/         # 可运行示例
 ```
+
+### 失败重试与兜底
+
+`OpenAILLM` 会对失败的模型调用自动重试 1 次（构造时可用 `retries` 调整，`retries=0` 表示不重试）。网络错误、服务端错误和空响应都会触发重试；流式模式下，如果已经向调用方输出过 token，则不会重试，以免重复打印。
+
+重试后仍然失败时，ReAct 循环不会抛错，而是返回兜底结果：
+
+```python
+result = agent.run(question)
+if result.reason == "llm_fallback":
+    print(result.answer)  # 抱歉，模型服务暂时不可用，请稍后重试。
+```
+
+此时 `result.ok` 为 `False`，`result.error` 保留原始失败原因；CLI 会打印 `兜底答案: ...` 并以退出码 1 结束。
 
 ### 注册自定义工具
 

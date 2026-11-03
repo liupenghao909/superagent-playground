@@ -1,6 +1,9 @@
+from types import SimpleNamespace
+
 import pytest
 
-from superagent_playground.agent import ReActAgent
+from superagent_playground.agent import FALLBACK_ANSWER, ReActAgent
+from superagent_playground.llm import OpenAILLM
 from superagent_playground.prompt import build_react_prompt
 from superagent_playground.tools import ToolRegistry
 
@@ -107,13 +110,76 @@ def test_agent_stops_at_max_steps():
     assert len(result.steps) == 2
 
 
-def test_agent_reports_llm_error():
+def test_agent_returns_fallback_answer_when_llm_fails():
     result = ReActAgent(ExplodingLLM(), make_registry()).run("问题")
 
     assert not result.ok
-    assert result.reason == "llm_error"
+    assert result.answer == FALLBACK_ANSWER
+    assert result.reason == "llm_fallback"
     assert "network down" in result.error
     assert result.steps == []
+
+
+def test_agent_returns_fallback_when_llm_returns_empty_text():
+    result = ReActAgent(FakeLLM(["   "]), make_registry()).run("问题")
+
+    assert not result.ok
+    assert result.answer == FALLBACK_ANSWER
+    assert result.reason == "llm_fallback"
+    assert "空响应" in result.error
+
+
+class FailingAfterOneStepLLM:
+    def __init__(self):
+        self.calls = 0
+
+    def think(self, messages, *, temperature=None):
+        self.calls += 1
+        if self.calls == 1:
+            return "Thought: 先搜索。\nAction: Search[x]"
+        raise RuntimeError("network down")
+
+
+def test_agent_fallback_keeps_steps_completed_before_failure():
+    result = ReActAgent(FailingAfterOneStepLLM(), make_registry()).run("问题")
+
+    assert result.reason == "llm_fallback"
+    assert len(result.steps) == 1
+    assert result.steps[0].observation == "搜索结果: x"
+
+
+def test_agent_retries_model_call_before_giving_up():
+    class FlakyCompletions:
+        def __init__(self):
+            self.calls = 0
+
+        def create(self, **kwargs):
+            self.calls += 1
+            if self.calls == 1:
+                raise RuntimeError("timeout")
+            return SimpleNamespace(
+                choices=[
+                    SimpleNamespace(
+                        message=SimpleNamespace(
+                            content="Thought: 直接回答。\nAction: Finish[完成]"
+                        )
+                    )
+                ]
+            )
+
+    completions = FlakyCompletions()
+    client = SimpleNamespace(chat=SimpleNamespace(completions=completions))
+    llm = OpenAILLM(
+        model="test-model",
+        api_key="test-key",
+        base_url="http://localhost:8000/v1",
+        client=client,
+    )
+    result = ReActAgent(llm, make_registry()).run("问题")
+
+    assert result.ok
+    assert result.answer == "完成"
+    assert completions.calls == 2
 
 
 def test_agent_reports_tool_exception_as_observation():
