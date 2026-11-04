@@ -4,7 +4,15 @@ from __future__ import annotations
 
 from .agent import FALLBACK_ANSWER, ReActAgent, ReActResult, Step
 from .llm import LLM, LLMConfig, LLMError, OpenAILLM
-from .parser import Action, ParsedOutput, ToolInvocation, parse_action, parse_output
+from .parser import (
+    Action,
+    ParsedOutput,
+    ToolInvocation,
+    parse_action,
+    parse_output,
+    parse_plan,
+)
+from .plan_and_solve import PlanAndSolveAgent, PlanAndSolveResult, PlanStep
 from .tools import (
     Tool,
     ToolRegistry,
@@ -13,7 +21,7 @@ from .tools import (
     serpapi_search,
 )
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 
 __all__ = [
     "Action",
@@ -23,6 +31,9 @@ __all__ = [
     "LLMError",
     "OpenAILLM",
     "ParsedOutput",
+    "PlanAndSolveAgent",
+    "PlanAndSolveResult",
+    "PlanStep",
     "ReActAgent",
     "ReActResult",
     "Step",
@@ -33,5 +44,6 @@ __all__ = [
     "calculate",
     "parse_action",
     "parse_output",
+    "parse_plan",
     "serpapi_search",
 ]

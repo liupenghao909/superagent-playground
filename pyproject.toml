@@ -4,12 +4,12 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "superagent-playground"
-version = "0.1.0"
-description = "A small playground for classic agent paradigms, starting with ReAct."
+version = "0.2.0"
+description = "A small playground for classic agent paradigms: ReAct and Plan-and-Solve."
 readme = "README.md"
 requires-python = ">=3.10"
 authors = [{ name = "superagent-playground contributors" }]
-keywords = ["agents", "react", "llm", "tool-use"]
+keywords = ["agents", "react", "plan-and-solve", "planning", "llm", "tool-use"]
 dependencies = [
     "openai>=1.0.0",
     "python-dotenv>=1.0.0",

@@ -30,5 +30,8 @@ jobs:
       - name: Run tests
         run: python -m pytest
 
-      - name: Run offline demo
+      - name: Run ReAct offline demo
         run: python examples/offline_demo.py
+
+      - name: Run Plan-and-Solve offline demo
+        run: python examples/plan_and_solve_demo.py

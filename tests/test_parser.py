@@ -2,6 +2,7 @@ from superagent_playground.parser import (
     ToolInvocation,
     parse_action,
     parse_output,
+    parse_plan,
 )
 
 
@@ -94,3 +95,59 @@ def test_empty_response_yields_nothing():
     assert parsed.thought is None
     assert parsed.action_text is None
     assert parsed.action is None
+
+
+def test_parse_plan_reads_python_list_inside_code_fence():
+    plan = parse_plan(
+        "```python\n"
+        '["计算周二销量", "计算周三销量", "计算总销量"]\n'
+        "```"
+    )
+
+    assert plan == ["计算周二销量", "计算周三销量", "计算总销量"]
+
+
+def test_parse_plan_reads_bare_python_list_with_prose():
+    plan = parse_plan('计划如下：["第一步", "第二步"]。请开始执行。')
+
+    assert plan == ["第一步", "第二步"]
+
+
+def test_parse_plan_reads_numbered_markdown_list():
+    plan = parse_plan("## 计划\n1. 第一步\n2. 第二步\n3. 第三步")
+
+    assert plan == ["第一步", "第二步", "第三步"]
+
+
+def test_parse_plan_joins_indented_continuation_lines():
+    plan = parse_plan("1. 计算总量\n   并保留两位小数\n2. 给出答案")
+
+    assert plan == ["计算总量 并保留两位小数", "给出答案"]
+
+
+def test_parse_plan_reads_bulleted_list():
+    plan = parse_plan("- 第一步\n- 第二步")
+
+    assert plan == ["第一步", "第二步"]
+
+
+def test_parse_plan_ignores_non_string_and_empty_items():
+    plan = parse_plan('["第一步", 42, "", " ", "第二步"]')
+
+    assert plan == ["第一步", "第二步"]
+
+
+def test_parse_plan_returns_empty_for_empty_or_unparseable_text():
+    assert parse_plan("") == []
+    assert parse_plan("   ") == []
+    assert parse_plan("我不知道该怎么计划。") == []
+
+
+def test_parse_plan_accepts_a_single_step_plan():
+    assert parse_plan('["直接回答"]') == ["直接回答"]
+
+
+def test_parse_plan_prefers_numbered_steps_over_embedded_list():
+    plan = parse_plan('1. 输出 ["a", "b"]\n2. 解释结果')
+
+    assert plan == ['输出 ["a", "b"]', "解释结果"]

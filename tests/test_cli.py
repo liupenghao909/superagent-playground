@@ -79,3 +79,79 @@ def test_cli_prints_fallback_answer(monkeypatch, capsys):
     captured = capsys.readouterr()
     assert exit_code == 1
     assert "兜底答案" in captured.out
+
+
+def test_plan_and_solve_demo_runs_without_api_key(capsys):
+    exit_code = cli.main(["--demo", "--paradigm", "plan-and-solve", "--quiet"])
+
+    captured = capsys.readouterr()
+    assert exit_code == 0
+    assert "最终答案" in captured.out
+    assert "70" in captured.out
+
+
+def test_plan_and_solve_demo_verbose_prints_plan_and_steps(capsys):
+    exit_code = cli.main(["--demo", "--paradigm", "plan-and-solve"])
+
+    captured = capsys.readouterr()
+    assert exit_code == 0
+    assert "--- 规划阶段 ---" in captured.out
+    assert "--- 执行第 1/3 步 ---" in captured.out
+    assert "计算周二销量" in captured.out
+
+
+def test_cli_runs_plan_and_solve_paradigm(monkeypatch, capsys):
+    class PlanStubLLM:
+        def __init__(self, *args, **kwargs):
+            self.responses = ['["第一步", "第二步"]', "中间结果", "42"]
+
+        def think(self, messages, *, temperature=None):
+            return self.responses.pop(0)
+
+    monkeypatch.setattr(cli, "OpenAILLM", PlanStubLLM)
+    exit_code = cli.main(["问题", "--quiet", "--paradigm", "plan-and-solve"])
+
+    captured = capsys.readouterr()
+    assert exit_code == 0
+    assert "最终答案: 42" in captured.out
+
+
+def test_cli_reports_plan_error(monkeypatch, capsys):
+    class BadPlannerLLM:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def think(self, messages, *, temperature=None):
+            return "这不是一个计划"
+
+    monkeypatch.setattr(cli, "OpenAILLM", BadPlannerLLM)
+    exit_code = cli.main(["问题", "--quiet", "--paradigm", "plan-and-solve"])
+
+    captured = capsys.readouterr()
+    assert exit_code == 1
+    assert "未能生成有效计划" in captured.err
+
+
+def test_cli_enforces_max_steps_for_plan_and_solve(monkeypatch, capsys):
+    class TwoStepPlanLLM:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def think(self, messages, *, temperature=None):
+            return '["第一步", "第二步"]'
+
+    monkeypatch.setattr(cli, "OpenAILLM", TwoStepPlanLLM)
+    exit_code = cli.main(
+        ["问题", "--quiet", "--paradigm", "plan-and-solve", "--max-steps", "1"]
+    )
+
+    captured = capsys.readouterr()
+    assert exit_code == 1
+    assert "超过 max_steps=1" in captured.err
+
+
+def test_unknown_paradigm_is_rejected():
+    with pytest.raises(SystemExit) as excinfo:
+        cli.main(["--paradigm", "unknown", "--demo"])
+
+    assert excinfo.value.code == 2
