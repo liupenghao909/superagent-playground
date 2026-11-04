@@ -1,4 +1,4 @@
-"""Command line entry point for the ReAct agent."""
+"""Command line entry point for the classic agent paradigms."""
 
 from __future__ import annotations
 
@@ -7,29 +7,38 @@ import sys
 from typing import Sequence
 
 from .agent import ReActAgent, ReActResult
-from .demo import run_offline_demo
+from .demo import run_offline_demo, run_plan_and_solve_demo
 from .llm import LLMError, OpenAILLM
+from .plan_and_solve import PlanAndSolveAgent, PlanAndSolveResult
 from .tools import build_default_registry
 
 EXAMPLES = """示例:
   superagent "华为最新的手机是哪一款？它的主要卖点是什么？"
-  superagent --demo            # 无需 API Key 的离线演示
+  superagent --paradigm plan-and-solve "一个水果店周一卖出 15 个苹果……"
+  superagent --demo            # 无需 API Key 的 ReAct 离线演示
+  superagent --demo --paradigm plan-and-solve   # Plan-and-Solve 离线演示
 """
 
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="superagent",
-        description="运行一个使用 ReAct 范式的智能体。",
+        description="运行一个使用经典范式的智能体（ReAct 或 Plan-and-Solve）。",
         epilog=EXAMPLES,
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument("question", nargs="*", help="要解决的问题。")
     parser.add_argument(
+        "--paradigm",
+        choices=("react", "plan-and-solve"),
+        default="react",
+        help="智能体范式，默认 react。",
+    )
+    parser.add_argument(
         "--max-steps",
         type=int,
-        default=5,
-        help="ReAct 循环的最大步数，默认 5。",
+        default=None,
+        help="ReAct 循环或 Plan-and-Solve 计划执行的最大步数（默认分别为 5 和 8）。",
     )
     parser.add_argument(
         "--stream",
@@ -39,7 +48,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--demo",
         action="store_true",
-        help="运行无需 API Key 的离线计算器演示。",
+        help="运行无需 API Key 的离线演示（默认 ReAct）。",
     )
     parser.add_argument(
         "--quiet",
@@ -49,20 +58,22 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _print_result(result: ReActResult) -> None:
+def _print_result(result: ReActResult | PlanAndSolveResult) -> None:
     if result.reason == "llm_fallback":
         print(f"兜底答案: {result.answer}")
         return
     if result.ok:
         print(f"最终答案: {result.answer}")
         return
-    if result.reason == "llm_error":
+    if result.reason == "plan_error":
+        print(f"未能生成有效计划: {result.error}", file=sys.stderr)
+    elif result.reason == "llm_error":
         print(f"LLM 调用失败: {result.error}", file=sys.stderr)
     elif result.reason == "max_steps":
-        print(
-            f"已达到最大步数 {len(result.steps)}，未能得到最终答案。",
-            file=sys.stderr,
+        detail = result.error or (
+            f"已达到最大步数 {len(result.steps)}，未能得到最终答案。"
         )
+        print(detail, file=sys.stderr)
     else:
         print("未能得到最终答案。", file=sys.stderr)
 
@@ -71,11 +82,17 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
 
-    if args.max_steps < 1:
+    max_steps = args.max_steps
+    if max_steps is None:
+        max_steps = 8 if args.paradigm == "plan-and-solve" else 5
+    if max_steps < 1:
         parser.error("--max-steps 必须大于 0。")
 
     if args.demo:
-        result = run_offline_demo(verbose=not args.quiet)
+        if args.paradigm == "plan-and-solve":
+            result = run_plan_and_solve_demo(verbose=not args.quiet)
+        else:
+            result = run_offline_demo(verbose=not args.quiet)
         _print_result(result)
         return 0 if result.ok else 1
 
@@ -98,12 +115,20 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(f"配置错误: {exc}", file=sys.stderr)
         return 2
 
-    agent = ReActAgent(
-        llm,
-        build_default_registry(),
-        max_steps=args.max_steps,
-        verbose=not args.quiet and not args.stream,
-    )
+    agent: ReActAgent | PlanAndSolveAgent
+    if args.paradigm == "plan-and-solve":
+        agent = PlanAndSolveAgent(
+            llm,
+            max_steps=max_steps,
+            verbose=not args.quiet and not args.stream,
+        )
+    else:
+        agent = ReActAgent(
+            llm,
+            build_default_registry(),
+            max_steps=max_steps,
+            verbose=not args.quiet and not args.stream,
+        )
     result = agent.run(question)
     if args.stream:
         print()

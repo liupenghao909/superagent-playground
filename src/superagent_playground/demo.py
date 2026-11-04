@@ -1,10 +1,11 @@
-"""A deterministic, offline ReAct demo that needs no API key."""
+"""Deterministic, offline demos for both paradigms; no API key needed."""
 
 from __future__ import annotations
 
 from typing import Callable, Mapping, Sequence
 
 from .agent import ReActAgent, ReActResult
+from .plan_and_solve import PlanAndSolveAgent, PlanAndSolveResult
 from .tools import build_default_registry
 
 DEMO_QUESTION = "请计算 (12 + 8) * 3，并告诉我结果是否大于 50。"
@@ -18,6 +19,23 @@ DEMO_RESPONSES = [
         "Thought: 计算结果是 60，60 大于 50，因此可以给出最终答案。\n"
         "Action: Finish[(12 + 8) * 3 = 60，结果大于 50。]"
     ),
+]
+
+PLAN_DEMO_QUESTION = (
+    "水果店周一卖出 15 个苹果，周二的销量是周一的 2 倍，"
+    "周三的销量比周二少 5 个。这三天一共卖出多少个苹果？"
+)
+
+PLAN_DEMO_RESPONSES = [
+    (
+        "```python\n"
+        '["计算周二销量：15 × 2", "计算周三销量：周二销量 - 5", '
+        '"计算三天总销量：周一 + 周二 + 周三"]\n'
+        "```"
+    ),
+    "30",
+    "25",
+    "70",
 ]
 
 
@@ -61,3 +79,20 @@ def run_offline_demo(
         logger=logger,
     )
     return agent.run(DEMO_QUESTION)
+
+
+def run_plan_and_solve_demo(
+    *,
+    verbose: bool = True,
+    logger: Callable[[str], None] = print,
+) -> PlanAndSolveResult:
+    """Run the scripted word problem through the real Plan-and-Solve loop."""
+
+    llm = ScriptedLLM(PLAN_DEMO_RESPONSES)
+    agent = PlanAndSolveAgent(
+        llm,
+        max_steps=5,
+        verbose=verbose,
+        logger=logger,
+    )
+    return agent.run(PLAN_DEMO_QUESTION)

@@ -1,12 +1,13 @@
-"""Parsing helpers for the ReAct textual protocol.
+"""Parsing helpers for the ReAct and Plan-and-Solve textual protocols.
 
-The protocol is intentionally small: the model replies with a ``Thought``
-followed by an ``Action``, and the action is either ``Tool[input]`` or
-``Finish[answer]``.
+ReAct replies contain a ``Thought`` followed by an ``Action``, where the
+action is either ``Tool[input]`` or ``Finish[answer]``. Plan-and-Solve replies
+contain an ordered list of plan steps, preferably as a Python list literal.
 """
 
 from __future__ import annotations
 
+import ast
 import re
 from dataclasses import dataclass
 
@@ -24,6 +25,13 @@ _INVOCATION_RE = re.compile(
     r"^([A-Za-z_][\w.-]*)\s*\[(.*)\]\s*$", re.DOTALL
 )
 _FENCE_RE = re.compile(r"^\s*```[^\n]*\n(.*?)\n?```\s*$", re.DOTALL)
+_LIST_FENCE_RE = re.compile(r"```[^\n]*\n(.*?)```", re.DOTALL)
+_PLAN_ITEM_RE = re.compile(
+    r"^\s*(?:\d+\s*[.)、]|第\s*\d+\s*步\s*[:：.]?|step\s*\d+\s*[:：.]?)\s*(.+?)\s*$",
+    re.IGNORECASE,
+)
+_BULLET_RE = re.compile(r"^\s*[-*•]\s+(.+?)\s*$")
+_HEADING_RE = re.compile(r"^\s*#{1,6}\s+")
 
 
 @dataclass(frozen=True)
@@ -126,4 +134,74 @@ def parse_output(text: str) -> ParsedOutput:
         thought=thought or None,
         action_text=action_text or None,
         action=parse_action(action_text) if action_text else None,
+    )
+
+
+def _plan_items_from_literal(text: str, *, fenced_only: bool = False) -> list[str]:
+    """Return plan steps from a Python list literal, if one is present."""
+
+    candidates = [
+        match.group(1).strip() for match in _LIST_FENCE_RE.finditer(text)
+    ]
+    if not fenced_only:
+        body = _strip_code_fence(text)
+        candidates.append(body)
+        start, end = body.find("["), body.rfind("]")
+        if start != -1 and end > start:
+            candidates.append(body[start : end + 1])
+
+    for candidate in candidates:
+        if not candidate:
+            continue
+        try:
+            value = ast.literal_eval(candidate)
+        except (ValueError, SyntaxError):
+            continue
+        if not isinstance(value, (list, tuple)):
+            continue
+        items = [
+            item.strip()
+            for item in value
+            if isinstance(item, str) and item.strip()
+        ]
+        if items:
+            return items
+    return []
+
+
+def _plan_items_from_lines(text: str) -> list[str]:
+    """Return plan steps from a Markdown-style numbered or bulleted list."""
+
+    items: list[str] = []
+    for raw_line in _strip_code_fence(text).splitlines():
+        line = raw_line.strip()
+        if not line or _HEADING_RE.match(line):
+            continue
+        match = _PLAN_ITEM_RE.match(line) or _BULLET_RE.match(line)
+        if match:
+            items.append(match.group(1).strip())
+        elif items and raw_line[:1].isspace():
+            # An indented line continues the previous step.
+            items[-1] = f"{items[-1]} {line}"
+    return [item for item in items if item]
+
+
+def parse_plan(text: str) -> list[str]:
+    """Extract the ordered steps of a planner reply.
+
+    The planner is asked for a Python list inside a code fence because that is
+    unambiguous. Replies that use a numbered or bulleted Markdown list are
+    accepted too, which keeps the agent tolerant of small format slips.
+    """
+
+    if not text or not text.strip():
+        return []
+
+    # A fenced Python list is the requested format. Only fall back to a list
+    # wrapped in prose after checking Markdown lists, so a step like
+    # ``1. 输出 ["a", "b"]`` is not mistaken for a bare plan list.
+    return (
+        _plan_items_from_literal(text, fenced_only=True)
+        or _plan_items_from_lines(text)
+        or _plan_items_from_literal(text)
     )

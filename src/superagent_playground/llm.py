@@ -1,4 +1,4 @@
-"""Language model clients used by the ReAct agent."""
+"""Language model clients used by the agent loops."""
 
 from __future__ import annotations
 
@@ -20,7 +20,7 @@ class LLMError(RuntimeError):
 
 @runtime_checkable
 class LLM(Protocol):
-    """The minimal interface the ReAct loop needs from a language model."""
+    """The minimal interface the agent loops need from a language model."""
 
     def think(
         self,
@@ -186,7 +186,7 @@ class OpenAILLM:
     ) -> str:
         """Call the model, retrying a failed call ``retries`` times.
 
-        The ReAct loop turns the final :class:`LLMError` into a fallback
+        The agent loops turn the final :class:`LLMError` into a fallback
         answer, so callers only see an exception when no answer can be made.
         """
 
